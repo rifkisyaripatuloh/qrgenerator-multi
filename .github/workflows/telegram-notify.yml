@@ -1,0 +1,93 @@
+﻿name: GitHub Telegram Notification
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Telegram - Push
+        if: github.event_name == 'push'
+        continue-on-error: true
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -z "$BOT_TOKEN" ] || [ -z "$CHAT_ID" ]; then
+            echo "Telegram secrets are not configured; skipping push notification."
+            exit 0
+          fi
+
+          MESSAGE=$(printf '📤 GITHUB PUSH\n\nRepository: %s\nBranch: %s\nDeveloper: %s\nCommit: %.7s\n\nDetail: %s/%s/commit/%s' \
+            "$GITHUB_REPOSITORY" \
+            "$GITHUB_REF_NAME" \
+            "$GITHUB_ACTOR" \
+            "$GITHUB_SHA" \
+            "$GITHUB_SERVER_URL" \
+            "$GITHUB_REPOSITORY" \
+            "$GITHUB_SHA")
+
+          curl --fail --silent --show-error \
+            -X POST \
+            "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            --data-urlencode "text=${MESSAGE}"
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build Project
+        run: npm run build
+
+      - name: Notify Telegram - Build Result
+        if: always()
+        continue-on-error: true
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BUILD_STATUS: ${{ job.status }}
+        run: |
+          if [ -z "$BOT_TOKEN" ] || [ -z "$CHAT_ID" ]; then
+            echo "Telegram secrets are not configured; skipping build notification."
+            exit 0
+          fi
+
+          if [ "$BUILD_STATUS" = "success" ]; then
+            STATUS="✅ BUILD BERHASIL"
+          else
+            STATUS="❌ BUILD / CI GAGAL"
+          fi
+
+          MESSAGE=$(printf '%s\n\nRepository: %s\nBranch: %s\nDeveloper: %s\nCommit: %.7s\n\nLihat Logs: %s/%s/actions/runs/%s' \
+            "$STATUS" \
+            "$GITHUB_REPOSITORY" \
+            "$GITHUB_REF_NAME" \
+            "$GITHUB_ACTOR" \
+            "$GITHUB_SHA" \
+            "$GITHUB_SERVER_URL" \
+            "$GITHUB_REPOSITORY" \
+            "$GITHUB_RUN_ID")
+
+          curl --fail --silent --show-error \
+            -X POST \
+            "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            --data-urlencode "text=${MESSAGE}"
